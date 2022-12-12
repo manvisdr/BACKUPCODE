@@ -1,6 +1,9 @@
 #include <Arduino.h>
-// #define TIME_METER
-#define TIME_RTC
+
+#define TYPE_SEND_LORA
+#define US_915
+#define TIME_METER
+// #define TIME_RTC
 #ifdef TIME_RTC
 #include <DS1307RTC.h>
 #endif
@@ -9,9 +12,9 @@
 #include <SPI.h>
 #include "EDMICmdLine.h"
 #include <lorawan.h>
+#include <Preferences.h>
 
-#define TYPE_MK10e
-#define TYPE_SEND_LORA
+Preferences preferences;
 
 #if defined(TYPE_SEND_LORA)
 #define csLora 5 // PIN CS LORA
@@ -37,9 +40,13 @@ String customerID = "54565456";
 String kwhID;
 String kwhType = "MK10E";
 const String channelId = "monKWH/";
-const char *devAddr = "260D6ECC";
-const char *nwkSKey = "1FD053B476BF4F732DC8CF5E565538B9";
-const char *appSKey = "2EE8E2940E6799AD78F9F4C6DA8C53D1";
+// kwh legi bni
+// const char *devAddr = "260D6ECC";
+// const char *nwkSKey = "1FD053B476BF4F732DC8CF5E565538B9";
+// const char *appSKey = "2EE8E2940E6799AD78F9F4C6DA8C53D1";
+const char *devAddr = "260d44c2";
+const char *nwkSKey = "927b1ef8e776a54185c1a51fdd43dfcb";
+const char *appSKey = "aff8978601d9c13c3fb153c5ef2df551";
 const unsigned int interval = 5000;
 const unsigned int interval_cek_konek = 2000;
 const unsigned int interval_record = 20000;
@@ -53,6 +60,8 @@ bool kwhReadReady = false;
 bool kwhSend = false;
 char myStr[255];
 
+unsigned int fcnt;
+
 bool loraConf()
 {
   lora.setDeviceClass(CLASS_C);
@@ -61,7 +70,7 @@ bool loraConf()
   lora.setNwkSKey(nwkSKey);
   lora.setAppSKey(appSKey);
   lora.setDevAddr(devAddr);
-
+  lora.setFrameCounter(fcnt);
   return true;
 }
 
@@ -140,18 +149,11 @@ void setup()
   Serial2.begin(9600, SERIAL_8N1, RXD2, TXD2);
   pinMode(PIN_LED_PROC, OUTPUT);
   pinMode(PIN_LED_WARN, OUTPUT);
+  preferences.begin("settings", false);
+  fcnt = preferences.getUInt("lora_fcnt", 0);
   digitalWrite(PIN_LED_PROC, LOW);
 #if defined TIME_RTC
   setSyncProvider(RTC.get); //******************************************
-#elif defined TIME_METER
-  edmiread.read_time();
-  setTime(
-      edmiread.timeEdmi.hour,
-      edmiread.timeEdmi.minute,
-      edmiread.timeEdmi.seconds,
-      edmiread.timeEdmi.day,
-      edmiread.timeEdmi.month,
-      edmiread.timeEdmi.year);
 #endif
 
   if (!lora.init())
@@ -161,10 +163,20 @@ void setup()
   loraConf();
 
   Alarm.timerRepeat(60, BackgroundDelay); // timer for every 15 seconds
-  // Alarm.timerRepeat(35, BackgroundSend);  // timer for every 15 seconds
   if (kwhID.length() == 0)
   {
     kwhID = edmiread.serialNumber();
+    Serial.println("get KWH SerialNumber in setup()");
+#if defined TIME_METER
+    edmiread.read_time();
+    setTime(
+        edmiread.timeEdmi.hour,
+        edmiread.timeEdmi.minute,
+        edmiread.timeEdmi.seconds,
+        edmiread.timeEdmi.day,
+        edmiread.timeEdmi.month,
+        edmiread.timeEdmi.year);
+#endif
     Serial.println(kwhID);
   }
 
@@ -195,9 +207,9 @@ void loop()
             3,
             customerID,
             kwhID,
-            String(edmiread.voltR()*1000, 4).c_str(),
-            String(edmiread.voltS()*1000, 4).c_str(),
-            String(edmiread.voltT()*1000, 4).c_str(),
+            String(edmiread.voltR() * 1000, 4).c_str(),
+            String(edmiread.voltS() * 1000, 4).c_str(),
+            String(edmiread.voltT() * 1000, 4).c_str(),
             String(edmiread.currentR(), 4).c_str(),
             String(edmiread.currentS(), 4).c_str(),
             String(edmiread.currentT(), 4).c_str(),
@@ -215,6 +227,10 @@ void loop()
     Serial.println("SEND WITH LORA");
     lora.sendUplink(myStr, strlen(myStr), 1, 1);
     lora.update();
+    preferences.putUInt("lora_fcnt", lora.getFrameCounter());
+    fcnt = preferences.getUInt("lora_fcnt", 0);
+    Serial.printf("Frame Counter: %d\n", fcnt);
+    kwhReadReady = false;
     kwhReadReady = false;
     // digitalWrite(PIN_LED_PROC, LOW);
   }
